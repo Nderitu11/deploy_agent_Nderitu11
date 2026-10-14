@@ -98,7 +98,7 @@ choose_project() {
 
     if [ ! -d "$PROJECT_DIR" ]; then
         echo "Project not found. Deploy it first."
-        return 1
+        return 1  
     fi
 }
 

@@ -140,7 +140,7 @@ TESTING
 - Test deployment using both roster options.
 - Confirm that the correct directory structure and configuration values are created.
 - Enter invalid threshold values and confirm that they are rejected.
-- Verify file permissions using `ls -l`.
+- Verify file permissions using ls 
 - Run the application and complete a sample attendance session.
 - Archive the logs and verify their destinations and timestamped names.
 - Test missing log files and existing project directories.
@@ -149,5 +149,4 @@ TESTING
 
 VIDEO DEMONSTRATION
 
-Video link: [Insert your demonstration video URL here]
-
+Video link: https://drive.google.com/file/d/1Gjl8LCJnTEprKyFlwEQHo2kjCXFnlX-l/view?usp=sharing
