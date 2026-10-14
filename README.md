@@ -1,65 +1,153 @@
-
 DEPLOY AGENT
 
-Shell script to deploy, run and archive logs for the Student Attendance Tracker.
+# Automated Project Bootstrapping & Process Management
+
+The Python Student Attendance Tracker application is automated by a bash script for deployment and management in this project.
+
+The script is called 'deploy_agent.sh' It provides three main features:
+
+1. Deploy the application.
+2. Run the application.
+3. Archive attendance log files.
+
+It also carries out pre-flight checks, sets file permissions, lets users change attendance thresholds, and accommodates deployment interruptions due to Ctrl+ C or Ctrl+ Z.
+
+REPOSITORY STRUCTURE
+
+deploy_agent_GithubUsername/
+   -deploy_agent.sh
+   -README.md
+   -templates/
+             -attendance_checker.py
+             -assets.csv
+             -config.json
+
+Replace `GithubUsername` with your actual GitHub username.
+
+The `templates/` folder contains the original application files. The Python application is copied without modification.
+
+REQUIRED TOOLS
+
+The following tools must be installed:
+
+- Bash
+- Python 3
+- ZIP
+
+The script also requires the three template files listed above.
  
-REPOSITORY
-deploy_agent_Nderitu11
--deploy_agent.sh
--README.md
--templates/
-          -attendance_checker.py
-          -assets.csv              
-          -config.json          
-   
-RUNNING AND SELECTING A FEATURE
-There are three features to deploy, to run and to archive .
-so bash:
-chmod +x deploy_agent.sh - to give permissions
-./deploy_agent.sh        -provides an interactive menu with the options:1 Deploy, 2 Run, 3 Archive 4.Exit
-If you want to jump to the featues bash with the specification using the following command
-./deploy_agent.sh --deploy    
-./deploy_agent.sh --run
-./deploy_agent.sh --archive
+RUNNING THE SCRIPT
 
-DEPLOY
-1.Pre-flight: checks python3 and zip exist, prints python3 --version, and confirms the templates are readable.
-2.Name: asks for a name (characters should only be letters, digits, _, - only) and creates attendance_tracker_<name>in this case I used v1/ with attendance_checker.py, assets.csv,config.json. If the directory exists you are asked to overwrite or abort. 
-3.Roster: Option A copies N rows (+ header) from templates/assets.csv; Option B generates N students from built-in name/email arrays with counts at 0.
-4.total_sessions: Option A -> 5 (4 prior sessions + today); Option B -> 1 (first session). Set with sed.
-5.Permissions: chmod +x attendance_checker.py, chmod 600 Helpers/config.json, confirmed with ls -l.
-6.Thresholds: optional. Input must be whole numbers 0-100 and failure < warning; invalid input re-prompts before sed runs. Only the "warning" and "failure" lines are edited in place.
-7.Verify: launches the app (Feature 2).
-
-RUN
-
-Runs python3 attendance_checker.py from inside the chosen project directory.
-
-ARCHIVE
-
-Each existing log in reports/ is moved to its own archive directory with a timestamp (YYYYMMDD_HHMMSS):
-
-archives/attendance/attendance_20261011_143022.log
-archives/absent/absent_20261011_143022.log
-
-A missing log (e.g. no absences -> no absent.log) is reported and skipped; the script does not crash. Moving (not copying) keeps reports/ clean for the next session.
-
-SIGNALS (archive trigger)
-
-During deployment, SIGINT (Ctrl+C) and SIGTSTP (Ctrl+Z) are trapped. The handler:
-
-1.prints that deployment was interrupted,
-2.runs zip -r attendance_tracker_v1_archive.zip attendance_tracker_v1 (whatever exists so far),
-3.deletes the incomplete directory (only if the zip succeeded),
-4.exits cleanly.
-
-The trap is removed once deployment finishes, so it never affects attendance_checker.py marking sessions.
-
-Test it: run ./deploy_agent.sh --deploy, enter a name, and press Ctrl+C or Ctrl+Z at any prompt. Then unzip -l attendance_tracker_<name>_archive.zip to see the partial contents and ls to confirm the directory is gone.
-
-TESTING THE DEPLOYED STRUCTURE
+Open a terminal in the repository directory and run:
 bash
-find attendance_tracker_name | sort
-ls -l attendance_tracker_<name>/attendance_checker.py attendance_tracker_<name>/Helpers/config.json
-cat attendance_tracker_<name>/Helpers/config.json
+chmod +x deploy_agent.sh
+./deploy_agent.sh
+
+The script displays an interactive menu with option and menu:
+1.Deploy the application 
+2.Run an existing project
+3.Archive log files 
+4.Exit 
+
+Feature 1:DEPLOY
+To deploy the Application, perform the following steps:
+
+The feature deploymentchecks if Python3 and ZIP are installed and looks for required templates.
+A project name is entered by the user. If you don't have a project with the same name, the script will ask you if you want to overwrite it, and will create a new directory called attendance_tracker_"name" if you do.
+The application and configuration files are copied from "templates/".
+
+Roster Options
+
+Option A- Copy the template roster.
+
+To make a copy of the template roster, select Option A.Select Option A — Copy the template roster.
+
+How many students to copy is decided by the user of the program in the file `templates/assets.csv`. The header is added and the total_sessions is set to 5 to reflect the four previous sessions.
+
+Option B — Generate a fresh roster
+The script creates student records from two arrays (names and email prefixes). The number of sessions is always zero when it starts and `total_sessions=1`.
+
+Permissions
+
+The following permissions are applied in the script:
+
+- attendance_checker.py: executable.
+- Helpers/config.json: owner read/write only,`chmod 600`.
+
+Attendance thresholds
+
+The user can set the level of the warnings and the failure limit.
+The default setting values are 75% for warning and 50% for the failure. Input should be numbers, within range 0 to 100, and the failure threshold should be less than the warning threshold.
+The 'sed' command is used to modify the values in the deployed configuration file.
+The script is then run after deployment to test the application.
+
+Feature 2: RUN THE APPLICATION
+The run feature lets the user choose from a list of previously deployed projects.
+
+Switchs to the project directory and runs the script:
+
+bash
+python3 attendance_checker.py
+
+The application prompts the instructor to mark students as present or absent. It updates the roster and creates attendance logs in the reports/ directory.
+
+Feature 3:ARCHIVE LOGS
+
+The archive feature checks for the following files:
+
+- reports/attendance.log
+- reports/absent.log
+
+Each existing log is moved into its own archive directory. A timestamp is added to the filename to distinguish archived copies.
+
+The resulting structure is:
+archives/
+  -attendance/
+     -attendance_YYYYMMDD_HHMMSS.log
+  -absent/
+      -absent_YYYYMMDD_HHMMSS.log
+If a log does not exist, the script reports that it was skipped and continues processing the other log.
+
+SIGNAL HANDLING DEPLOYMENT
+
+During deployment, the script installs a signal trap for:
+
+- SIGINT, usually triggered by Ctrl+C.
+- SIGTSTP, usually triggered by Ctrl+Z.
+
+When either signal is received during deployment, the script attempts to create a ZIP archive named:
+
+attendance_tracker_<name>_archive.zip
+
+The archive is the original project directory (not fully complete) at the point of interruption.
+
+The incomplete project directory is removed from the workspace to avoid clutter if the ZIP archive is created. In the event of an archive failure, the directory is retained so that no files are lost.
+
+The signal trap is removed when deployment finishes successfully.
+
+How to test signal handling
+
+1. Start the script and choose deployment.
+2. Enter a project name.
+3. Interrupt the deployment while it is in progress.
+4. Check whether the ZIP archive was created.
+5. Confirm that the incomplete project directory was removed only after successful archiving.
+It's important to interrupt at the right time, so give it a test run and make sure that the resulting files are correct.
+
+TESTING
+
+- Confirm that Python 3 and ZIP are detected.
+- Test deployment using both roster options.
+- Confirm that the correct directory structure and configuration values are created.
+- Enter invalid threshold values and confirm that they are rejected.
+- Verify file permissions using `ls -l`.
+- Run the application and complete a sample attendance session.
+- Archive the logs and verify their destinations and timestamped names.
+- Test missing log files and existing project directories.
+- Test Ctrl+C and Ctrl+Z during deployment.
+- Confirm that interrupted deployment creates a ZIP archive and cleans up the incomplete directory when archiving succeeds.
+
+VIDEO DEMONSTRATION
+
+Video link: [Insert your demonstration video URL here]
 

@@ -1,283 +1,346 @@
-#!/usr/bin/env bash
+#!/bin/bash
+cd "$(dirname "$0")" || exit 1
 
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATES="$SCRIPT_DIR/templates"
-cd "$SCRIPT_DIR" || { echo "ERROR: cannot enter $SCRIPT_DIR"; exit 1; }
-
-PROJECT_DIR=""     
-DEPLOYING=0        
-
-
-is_int() { [[ "$1" =~ ^[0-9]+$ ]]; }
-
-die() { echo "ERROR: $*" >&2; exit 1; }
-
+PROJECT_DIR=""
+DEPLOYING=0
+TOTAL_SESSIONS=5
+error() {
+    echo "ERROR: $1"
+    exit 1
+}
 
 confirm() {
-    local ans
-    while true; do
-        read -r -p "$1 [y/n]: " ans
-        case "${ans,,}" in
-            y|yes) return 0 ;;
-            n|no)  return 1 ;;
-            *) echo "Please answer y or n." ;;
-        esac
-    done
+    local answer
+    read -r -p "$1 (y/n): " answer
+
+    case "$answer" in
+        y|Y|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
 }
-
-
 ask_number() {
-    local prompt="$1" min="$2" max="$3" val
-    while true; do
-        read -r -p "$prompt" val
-        if is_int "$val" && [ "$val" -ge "$min" ] && [ "$val" -le "$max" ]; then
-            REPLY_NUM="$val"
-            return 0
+    local answer
+    local min="$1"
+    local max="$2"
+
+    while true
+    do
+        read -r -p "$3" answer
+
+        if [[ "$answer" =~ ^[0-9]+$ ]] &&
+           [ "$answer" -ge "$min" ] &&
+           [ "$answer" -le "$max" ]; then
+            REPLY_NUM="$answer"
+            return
         fi
-        echo "Invalid input: enter a whole number between $min and $max."
+
+        echo "Enter a whole number between $min and $max."
     done
 }
-
 
 handle_interrupt() {
-    trap '' INT TSTP          
+    trap - INT TSTP
     echo
-    echo "!! Deployment interrupted by user."
-    if [ "$DEPLOYING" -eq 1 ] && [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
-        local zipfile="${PROJECT_DIR}_archive.zip"
-        echo "Archiving incomplete project to $zipfile ..."
-        if zip -rq "$zipfile" "$PROJECT_DIR"; then
-            echo "Archive created: $SCRIPT_DIR/$zipfile"
-            rm -rf "$PROJECT_DIR" && echo "Removed incomplete directory: $PROJECT_DIR"
+    echo "Deployment interrupted!"
+
+    if [ "$DEPLOYING" -eq 1 ] && [ -d "$PROJECT_DIR" ]; then
+        echo "Creating ZIP archive..."
+
+        if zip -rq "${PROJECT_DIR}_archive.zip" "$PROJECT_DIR"; then
+            echo "Archive created: ${PROJECT_DIR}_archive.zip"
+            rm -rf "$PROJECT_DIR"
+            echo "Incomplete project removed."
         else
-            echo "WARNING: zip failed; keeping $PROJECT_DIR so nothing is lost."
+            echo "ZIP failed. Keeping the project directory."
         fi
     else
-        echo "Nothing had been created yet, so there is nothing to archive."
+        echo "No incomplete project to archive."
     fi
-    echo "Session closed."
+
     exit 130
 }
 
+preflight() {
+    for tool in python3 zip
+    do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            error "$tool is not installed."
+        fi
+    done
+
+    python3 --version || error "Python check failed."
+
+    for file in attendance_checker.py assets.csv config.json
+    do
+        if [ ! -r "templates/$file" ]; then
+            error "Missing template: templates/$file"
+        fi
+    done
+
+    if [ ! -w "." ]; then
+        error "No permission to write in this directory."
+    fi
+
+    echo "Pre-flight checks passed."
+}
 
 choose_project() {
     local name
-    echo "Existing projects:"
-    ls -d attendance_tracker_*/ 2>/dev/null | sed 's#/$##; s#^#  - #' \
-        || true
-    read -r -p "Enter the project name (the part after attendance_tracker_): " name
-    [ -n "$name" ] || die "Project name cannot be empty."
-    PROJECT_DIR="attendance_tracker_${name}"
-    [ -d "$PROJECT_DIR" ] || die "Project directory '$PROJECT_DIR' does not exist. Deploy it first."
+
+    read -r -p "Enter the project name (without attendance_tracker_): " name
+
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "Invalid project name."
+        return 1
+    fi
+
+    PROJECT_DIR="attendance_tracker_$name"
+
+    if [ ! -d "$PROJECT_DIR" ]; then
+        echo "Project not found. Deploy it first."
+        return 1
+    fi
 }
 
-
-preflight() {
-    echo "Pre-flight checks"
-    local missing=0 tool
-    for tool in python3 zip; do
-        if command -v "$tool" >/dev/null 2>&1; then
-            echo "  [OK] $tool found"
-        else
-            echo "  [MISSING] $tool is not installed"
-            missing=1
-        fi
-    done
-    [ "$missing" -eq 0 ] || die "Install the missing tool(s) and try again."
-    python3 --version || die "python3 is installed but 'python3 --version' failed."
-    for f in attendance_checker.py assets.csv config.json; do
-        [ -r "$TEMPLATES/$f" ] || die "Template missing or unreadable: templates/$f"
-    done
-    [ -w "$SCRIPT_DIR" ] || die "No write permission in $SCRIPT_DIR."
-}
 
 build_roster_template() {
     local max count
-    max=$(( $(wc -l < "$TEMPLATES/assets.csv") - 1 ))
-    ask_number "How many students to copy (1-$max)? " 1 "$max"
+
+    max=$(($(wc -l < templates/assets.csv) - 1))
+
+    if [ "$max" -lt 1 ]; then
+        error "The roster template has no student rows."
+    fi
+
+    ask_number 1 "$max" "How many students should be copied? "
     count="$REPLY_NUM"
-    head -n $((count + 1)) "$TEMPLATES/assets.csv" > "$PROJECT_DIR/Helpers/assets.csv" \
-        || die "Could not write Helpers/assets.csv"
+
+    head -n "$((count + 1))" templates/assets.csv \
+        > "$PROJECT_DIR/Helpers/assets.csv" ||
+        error "Could not create the roster."
+
     TOTAL_SESSIONS=5
 }
 
 build_roster_fresh() {
-    local names=("Alice Johnson" "Bob Smith" "Carol White" "David Brown" "Eve Davis"
-                 "Frank Miller" "Grace Wilson" "Henry Moore" "Irene Taylor" "Jack Anderson"
-                 "Karen Thomas" "Leo Jackson" "Maria Harris" "Nathan Martin" "Olivia Clark"
-                 "Peter Lewis" "Quinn Walker" "Rachel Hall" "Samuel Young" "Tina King")
-    local emails=(alice bob carol david eve frank grace henry irene jack
-                  karen leo maria nathan olivia peter quinn rachel samuel tina)
-    local n i idx round email
-    ask_number "How many students to generate (1-100)? " 1 100
-    n="$REPLY_NUM"
-    {
-        echo "Email,Names,Attendance Count,Absence Count"
-        for ((i = 0; i < n; i++)); do
-            idx=$((i % ${#names[@]}))
-            round=$((i / ${#names[@]}))
-            email="${emails[$idx]}"
-            [ "$round" -gt 0 ] && email="${email}$((round + 1))"
-            echo "${email}@example.com,${names[$idx]},0,0"
-        done
-    } > "$PROJECT_DIR/Helpers/assets.csv" || die "Could not write Helpers/assets.csv"
+    local names=("Alice Johnson" "Bob Smith" "Carol White" "David Brown"
+                 "Eve Davis" "Frank Miller" "Grace Wilson" "Henry Moore"
+                 "Irene Taylor" "Jack Anderson")
+
+    local emails=("alice" "bob" "carol" "david" "eve"
+                  "frank" "grace" "henry" "irene" "jack")
+
+    local count i index email
+
+    ask_number 1 100 "How many students should be generated? "
+    count="$REPLY_NUM"
+
+    echo "Email,Names,Attendance Count,Absence Count" \
+        > "$PROJECT_DIR/Helpers/assets.csv"
+
+    for ((i=0; i<count; i++))
+    do
+        index=$((i % 10))
+        email="${emails[$index]}"
+
+        if [ "$i" -ge 10 ]; then
+            email="${email}$((i / 10 + 1))"
+        fi
+
+        echo "${email}@example.com,${names[$index]},0,0" \
+            >> "$PROJECT_DIR/Helpers/assets.csv"
+    done
+
     TOTAL_SESSIONS=1
 }
 
 update_thresholds() {
-    local cfg="$PROJECT_DIR/Helpers/config.json" warn fail
-    confirm "Do you want to update the attendance alert thresholds?" || return 0
-    while true; do
-        read -r -p "Warning threshold % [default 75]: " warn
-        warn="${warn:-75}"
-        read -r -p "Failure threshold % [default 50]: " fail
-        fail="${fail:-50}"
-        if ! is_int "$warn" || ! is_int "$fail"; then
-            echo "Both values must be whole numbers. Try again."
-        elif [ "$warn" -gt 100 ] || [ "$fail" -gt 100 ]; then
-            echo "Values must be between 0 and 100. Try again."
-        elif [ "$fail" -ge "$warn" ]; then
-            echo "Failure threshold must be lower than the warning threshold. Try again."
-        else
+    local warning failure
+
+    if ! confirm "Update attendance thresholds?"; then
+        return
+    fi
+
+    while true
+    do
+        read -r -p "Warning percentage (default 75): " warning
+        read -r -p "Failure percentage (default 50): " failure
+
+        warning="${warning:-75}"
+        failure="${failure:-50}"
+
+        if [[ "$warning" =~ ^[0-9]+$ ]] &&
+           [[ "$failure" =~ ^[0-9]+$ ]] &&
+           [ "$warning" -le 100 ] &&
+           [ "$failure" -le 100 ] &&
+           [ "$failure" -lt "$warning" ]; then
             break
         fi
+
+        echo "Enter numbers from 0 to 100. Failure must be lower than warning."
     done
- 
-    sed -i.bak -E "s/(\"warning\":[[:space:]]*)[0-9]+/\1${warn}/; s/(\"failure\":[[:space:]]*)[0-9]+/\1${fail}/" "$cfg" \
-        || die "sed failed to update thresholds."
-    rm -f "$cfg.bak"
-    echo "Thresholds updated: warning=$warn, failure=$fail"
+
+    sed -i -E \
+        "s/(\"warning\":[[:space:]]*)[0-9]+/\1$warning/" \
+        "$PROJECT_DIR/Helpers/config.json" ||
+        error "Could not update warning threshold."
+
+    sed -i -E \
+        "s/(\"failure\":[[:space:]]*)[0-9]+/\1$failure/" \
+        "$PROJECT_DIR/Helpers/config.json" ||
+        error "Could not update failure threshold."
+
+    echo "Thresholds updated."
+}
+
+run_app() {
+    if [ ! -f "$PROJECT_DIR/attendance_checker.py" ]; then
+        echo "Application file not found."
+        return 1
+    fi
+
+    echo "Starting attendance tracker..."
+    (cd "$PROJECT_DIR" && python3 attendance_checker.py)
 }
 
 deploy() {
-    local name
+    local name choice
+
     preflight
 
-    echo
-    read -r -p "Enter a name for the project (creates attendance_tracker_<name>): " name
-    [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || die "Invalid name. Use only letters, digits, '_' or '-'."
-    PROJECT_DIR="attendance_tracker_${name}"
+    read -r -p "Enter a project name: " name
+
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "Use letters, numbers, underscores or hyphens."
+        return
+    fi
+
+    PROJECT_DIR="attendance_tracker_$name"
 
     if [ -e "$PROJECT_DIR" ]; then
-        echo "'$PROJECT_DIR' already exists."
-        if confirm "Overwrite it?"; then
-            rm -rf "$PROJECT_DIR" || die "Could not remove existing '$PROJECT_DIR' (permission denied?)."
+        if confirm "Project exists. Overwrite it?"; then
+            rm -rf "$PROJECT_DIR" ||
+                error "Could not remove the existing project."
         else
-            PROJECT_DIR=""
-            die "Aborted: existing project left untouched."
+            echo "Deployment cancelled."
+            return
         fi
     fi
 
-    
     DEPLOYING=1
     trap handle_interrupt INT TSTP
 
-    echo "Creating directory structure..."
-    mkdir -p "$PROJECT_DIR/Helpers" "$PROJECT_DIR/reports" \
-        || die "Could not create directories (permission denied?)."
+    mkdir -p "$PROJECT_DIR/Helpers" "$PROJECT_DIR/reports" ||
+        error "Could not create project directories."
 
-    cp "$TEMPLATES/attendance_checker.py" "$PROJECT_DIR/attendance_checker.py" \
-        || die "Could not copy attendance_checker.py"
-    cp "$TEMPLATES/config.json" "$PROJECT_DIR/Helpers/config.json" \
-        || die "Could not copy config.json"
+    cp templates/attendance_checker.py "$PROJECT_DIR/" ||
+        error "Could not copy Python application."
 
-    echo
-    echo "How should the roster (Helpers/assets.csv) be built?"
-    echo "  A) Copy rows from templates/assets.csv"
-    echo "  B) Generate a fresh roster (all counts start at 0)"
-    local choice
-    while true; do
+    cp templates/config.json "$PROJECT_DIR/Helpers/" ||
+        error "Could not copy configuration."
+
+    echo "Choose how to create the roster:"
+    echo "A. Copy students from the template"
+    echo "B. Generate new students"
+
+    while true
+    do
         read -r -p "Choose A or B: " choice
-        case "${choice^^}" in
-            A) build_roster_template; break ;;
-            B) build_roster_fresh;    break ;;
-            *) echo "Please enter A or B." ;;
+
+        case "$choice" in
+            A|a)
+                build_roster_template
+                break
+                ;;
+            B|b)
+                build_roster_fresh
+                break
+                ;;
+            *)
+                echo "Choose A or B."
+                ;;
         esac
     done
 
-    
-    sed -i.bak -E "s/(\"total_sessions\":[[:space:]]*)[0-9]+/\1${TOTAL_SESSIONS}/" \
-        "$PROJECT_DIR/Helpers/config.json" || die "sed failed on total_sessions."
-    rm -f "$PROJECT_DIR/Helpers/config.json.bak"
-    echo "total_sessions set to $TOTAL_SESSIONS"
+    sed -i -E \
+        "s/(\"total_sessions\":[[:space:]]*)[0-9]+/\1$TOTAL_SESSIONS/" \
+        "$PROJECT_DIR/Helpers/config.json" ||
+        error "Could not update total sessions."
 
-    echo
-    chmod +x "$PROJECT_DIR/attendance_checker.py" || die "chmod +x failed."
-    chmod 600 "$PROJECT_DIR/Helpers/config.json" || die "chmod 600 failed."
-    echo "Permissions set:"
-    ls -l "$PROJECT_DIR/attendance_checker.py" "$PROJECT_DIR/Helpers/config.json"
+    chmod +x "$PROJECT_DIR/attendance_checker.py" ||
+        error "Could not set application permissions."
 
-    echo
+    chmod 600 "$PROJECT_DIR/Helpers/config.json" ||
+        error "Could not protect configuration."
+
+    echo "Application is executable."
+    echo "Configuration is restricted to owner read/write."
+
     update_thresholds
 
-    
     DEPLOYING=0
     trap - INT TSTP
 
-    echo
-    echo "Deployment complete: $PROJECT_DIR"
-    echo "Verifying deployment by launching the application..."
-    run_app "$PROJECT_DIR"
+    echo "Deployment complete!"
+    run_app
 }
-
-
-run_app() {
-    local dir="$1"
-    [ -f "$dir/attendance_checker.py" ] || die "attendance_checker.py not found in $dir"
-    ( cd "$dir" && python3 attendance_checker.py )
-    local rc=$?
-    [ "$rc" -eq 0 ] || echo "Application exited with status $rc."
-}
-
 
 archive_logs() {
-    local ts src dest name found=0
-    choose_project
-    ts="$(date +%Y%m%d_%H%M%S)"
+    local timestamp name source destination found=0
 
-    for name in attendance absent; do
-        src="$PROJECT_DIR/reports/${name}.log"
-        dest="$PROJECT_DIR/archives/${name}/${name}_${ts}.log"
-        if [ -f "$src" ]; then
-            if mkdir -p "$PROJECT_DIR/archives/${name}" && mv "$src" "$dest"; then
-                echo "Archived ${name}.log -> $dest"
+    choose_project || return
+
+    timestamp=$(date +%Y%m%d_%H%M%S)
+
+    for name in attendance absent
+    do
+        source="$PROJECT_DIR/reports/$name.log"
+        destination="$PROJECT_DIR/archives/$name/${name}_${timestamp}.log"
+
+        if [ -f "$source" ]; then
+            mkdir -p "$PROJECT_DIR/archives/$name" ||
+                error "Could not create archive directory."
+
+            if mv "$source" "$destination"; then
+                echo "Archived: $destination"
                 found=1
             else
-                echo "ERROR: could not archive $src (permission denied?)" >&2
+                echo "Could not archive $source."
             fi
         else
-            echo "No ${name}.log found in $PROJECT_DIR/reports/ - skipped."
+            echo "No $name.log found. Skipping."
         fi
     done
-    [ "$found" -eq 1 ] || echo "No logs were archived."
+
+    if [ "$found" -eq 0 ]; then
+        echo "No logs were archived."
+    fi
 }
 
+while true
+do
+    echo
+    echo "Attendance Tracker Deploy Agent"
+    echo "1. Deploy application"
+    echo "2. Run application"
+    echo "3. Archive logs"
+    echo "4. Exit"
 
-menu() {
-    local c
-    while true; do
-        echo
-        echo "Attendance Tracker Deploy Agent"
-        echo "1) Deploy the application"
-        echo "2) Run the application"
-        echo "3) Archive log files"
-        echo "4) Exit"
-        read -r -p "Select an option: " c
-        case "$c" in
-            1) deploy ;;
-            2) choose_project; run_app "$PROJECT_DIR" ;;
-            3) archive_logs ;;
-            4) echo "Goodbye."; exit 0 ;;
-            *) echo "Invalid option." ;;
-        esac
-    done
-}
+read -r -p "Choose an option: " choice
 
-case "$1" in
-    --deploy)  deploy ;;
-    --run)     choose_project; run_app "$PROJECT_DIR" ;;
-    --archive) archive_logs ;;
-    "")        menu ;;
-    *)         echo "Usage: $0 [--deploy|--run|--archive]"; exit 1 ;;
-esac
+    case "$choice" in
+        1) deploy ;;
+        2)
+            if choose_project; then
+                run_app
+            fi
+            ;;
+        3) archive_logs ;;
+        4)
+            echo "Goodbye!"
+            exit 0
+            ;;
+        *) echo "Invalid option." ;;
+    esac
+done
+
