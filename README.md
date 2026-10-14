@@ -1,4 +1,3 @@
-how to run the script and select a feature, how the threshold update works, how the log archiv (directories + timestamped filenames), how to test the Ctrl+C/Ctrl+Z path and what the .zip archive contains, and how you tested the deployed application structure.
 
 DEPLOY AGENT
 
@@ -25,7 +24,7 @@ If you want to jump to the featues bash with the specification using the followi
 
 DEPLOY
 1.Pre-flight: checks python3 and zip exist, prints python3 --version, and confirms the templates are readable.
-2.Name: asks for a name (characters should only be letters, digits, _, - only) and creates attendance_tracker_<name>/ with attendance_checker.py, assets.csv,config.json. If the directory exists you are asked to overwrite or abort. 
+2.Name: asks for a name (characters should only be letters, digits, _, - only) and creates attendance_tracker_<name>in this case I used v1/ with attendance_checker.py, assets.csv,config.json. If the directory exists you are asked to overwrite or abort. 
 3.Roster: Option A copies N rows (+ header) from templates/assets.csv; Option B generates N students from built-in name/email arrays with counts at 0.
 4.total_sessions: Option A -> 5 (4 prior sessions + today); Option B -> 1 (first session). Set with sed.
 5.Permissions: chmod +x attendance_checker.py, chmod 600 Helpers/config.json, confirmed with ls -l.
@@ -50,7 +49,7 @@ SIGNALS (archive trigger)
 During deployment, SIGINT (Ctrl+C) and SIGTSTP (Ctrl+Z) are trapped. The handler:
 
 1.prints that deployment was interrupted,
-2.runs zip -r attendance_tracker_<name>_archive.zip attendance_tracker_<name> (whatever exists so far),
+2.runs zip -r attendance_tracker_v1_archive.zip attendance_tracker_v1 (whatever exists so far),
 3.deletes the incomplete directory (only if the zip succeeded),
 4.exits cleanly.
 
@@ -64,4 +63,3 @@ find attendance_tracker_name | sort
 ls -l attendance_tracker_<name>/attendance_checker.py attendance_tracker_<name>/Helpers/config.json
 cat attendance_tracker_<name>/Helpers/config.json
 
-The built-in verification step (running the app) proves the structure, roster and config work together.

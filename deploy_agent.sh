@@ -74,7 +74,7 @@ choose_project() {
 
 
 preflight() {
-    echo "== Pre-flight checks =="
+    echo "Pre-flight checks"
     local missing=0 tool
     for tool in python3 zip; do
         if command -v "$tool" >/dev/null 2>&1; then
@@ -143,7 +143,7 @@ update_thresholds() {
             break
         fi
     done
-    # Edit only the two target lines, in place, without reformatting the file.
+ 
     sed -i.bak -E "s/(\"warning\":[[:space:]]*)[0-9]+/\1${warn}/; s/(\"failure\":[[:space:]]*)[0-9]+/\1${fail}/" "$cfg" \
         || die "sed failed to update thresholds."
     rm -f "$cfg.bak"
@@ -258,7 +258,7 @@ menu() {
     local c
     while true; do
         echo
-        echo "===== Attendance Tracker Deploy Agent ====="
+        echo "Attendance Tracker Deploy Agent"
         echo "1) Deploy the application"
         echo "2) Run the application"
         echo "3) Archive log files"
